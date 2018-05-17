@@ -369,7 +369,7 @@ def train_PG(exp_name='',
             # On the next line, implement a trick which is known empirically to reduce variance
             # in policy gradient methods: normalize adv_n to have mean zero and std=1. 
             # YOUR_CODE_HERE
-            adv_n = (adv_n - np.mean(adv_n)) / (np.std(adv_n) + 1e-8)
+            adv_n = (adv_n - np.mean(adv_n)) * (np.std(adv_n) + 1e-8)
 
 
         #====================================================================================#
