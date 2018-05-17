@@ -1,0 +1,16 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+notebook = "*"
+tensorflow = {path = "/tmp/tensorflow_pkg/tensorflow-1.8.0-cp36-cp36m-macosx_10_12_x86_64.whl"}
+gym = "*"
+scipy = "*"
+seaborn = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.6"
