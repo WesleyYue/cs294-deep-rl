@@ -9,6 +9,7 @@ tensorflow = {path = "/tmp/tensorflow_pkg/tensorflow-1.8.0-cp36-cp36m-macosx_10_
 gym = "*"
 scipy = "*"
 seaborn = "*"
+mujoco-py = "*"
 
 [dev-packages]
 

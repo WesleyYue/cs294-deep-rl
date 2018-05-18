@@ -18,7 +18,7 @@ def build_mlp(
         scope, 
         n_layers=2, 
         size=64, 
-        activation=tf.tanh,
+        activation=tf.nn.relu,
         output_activation=None
         ):
     #========================================================================================#
@@ -180,7 +180,7 @@ def train_PG(exp_name='',
         # YOUR_CODE_HERE
         sy_mean = build_mlp(sy_ob_no, ac_dim, scope="continuous")
         # logstd should just be a trainable variable, not a network output.
-        sy_logstd = tf.Variable(tf.random_uniform(tf.shape(sy_mean)))
+        sy_logstd = tf.random_uniform(tf.shape(sy_mean))
         sy_std = tf.exp(sy_logstd)
         sy_sampled_ac = sy_mean + sy_std * tf.random_normal(tf.shape(sy_mean))
         sy_logprob_n = 0.5 * tf.reduce_sum(tf.square(sy_mean - sy_ac_na) / sy_std, 1)  # Hint: Use the log probability under a multivariate gaussian. 
@@ -192,6 +192,8 @@ def train_PG(exp_name='',
     # Loss Function and Training Operation
     #========================================================================================#
 
+    print(sy_logprob_n)
+    print(sy_adv_n)
     loss = tf.reduce_mean(sy_logprob_n * sy_adv_n) # Loss function that we'll differentiate to get the policy gradient.
     update_op = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
@@ -369,7 +371,7 @@ def train_PG(exp_name='',
             # On the next line, implement a trick which is known empirically to reduce variance
             # in policy gradient methods: normalize adv_n to have mean zero and std=1. 
             # YOUR_CODE_HERE
-            adv_n = (adv_n - np.mean(adv_n)) * (np.std(adv_n) + 1e-8)
+            adv_n = (adv_n - np.mean(adv_n)) / (np.std(adv_n) + 1e-8)
 
 
         #====================================================================================#
