@@ -6,15 +6,11 @@ import scipy.signal
 import os
 import time
 import inspect
+import multiprocessing as mp #TODO(wy) clean up
 from multiprocessing import Process
 from model import PolicyGradient
+from distributed import Agent
 
-#============================================================================================#
-# Utilities
-#============================================================================================#
-
-def pathlength(path):
-    return len(path["reward"])
 
 #============================================================================================#
 # Policy Gradient
@@ -37,17 +33,6 @@ def train_PG(exp_name='',
              n_layers=1,
              size=32
              ):
-
-    start = time.time()
-
-    # Configure output directory for logging
-    logz.configure_output_dir(logdir)
-
-    # Log experimental parameters
-    args = inspect.getargspec(train_PG)[0]
-    locals_ = locals()
-    params = {k: locals_[k] if k in locals_ else None for k in args}
-    logz.save_params(params)
 
     # Set random seeds
     tf.set_random_seed(seed)
@@ -83,206 +68,13 @@ def train_PG(exp_name='',
     ob_dim = env.observation_space.shape[0]
     ac_dim = env.action_space.n if discrete else env.action_space.shape[0]
 
-    model = PolicyGradient(ob_dim, ac_dim, discrete, n_layers, size, learning_rate, nn_baseline)
 
-    #========================================================================================#
-    # Training Loop
-    #========================================================================================#
-
-    total_timesteps = 0
-
-    for itr in range(n_iter):
-        print("********** Iteration %i ************"%itr)
-
-        # Collect paths until we have enough timesteps
-        timesteps_this_batch = 0
-        paths = []
-        while True:
-            ob = env.reset()
-            obs, acs, rewards = [], [], []
-            animate_this_episode=(len(paths)==0 and (itr % 10 == 0) and animate)
-            steps = 0
-            while True:
-                if animate_this_episode:
-                    env.render()
-                    time.sleep(0.05)
-                obs.append(ob)
-                # ac = sess.run(sy_sampled_ac, feed_dict={sy_ob_no : ob[None]})
-                ac = model.run(ob)
-                ac = ac[0]
-                acs.append(ac)
-                ob, rew, done, _ = env.step(ac)
-                rewards.append(rew)
-                steps += 1
-                if done or steps > max_path_length:
-                    break
-            path = {"observation" : np.array(obs), 
-                    "reward" : np.array(rewards), 
-                    "action" : np.array(acs)}
-            paths.append(path)
-            timesteps_this_batch += pathlength(path)
-            if timesteps_this_batch > min_timesteps_per_batch:
-                break
-        total_timesteps += timesteps_this_batch
-
-        # Build arrays for observation, action for the policy gradient update by concatenating 
-        # across paths
-        ob_no = np.concatenate([path["observation"] for path in paths])
-        ac_na = np.concatenate([path["action"] for path in paths])
-
-        #====================================================================================#
-        #                           ----------SECTION 4----------
-        # Computing Q-values
-        #
-        # Your code should construct numpy arrays for Q-values which will be used to compute
-        # advantages (which will in turn be fed to the placeholder you defined above). 
-        #
-        # Recall that the expression for the policy gradient PG is
-        #
-        #       PG = E_{tau} [sum_{t=0}^T grad log pi(a_t|s_t) * (Q_t - b_t )]
-        #
-        # where 
-        #
-        #       tau=(s_0, a_0, ...) is a trajectory,
-        #       Q_t is the Q-value at time t, Q^{pi}(s_t, a_t),
-        #       and b_t is a baseline which may depend on s_t. 
-        #
-        # You will write code for two cases, controlled by the flag 'reward_to_go':
-        #
-        #   Case 1: trajectory-based PG 
-        #
-        #       (reward_to_go = False)
-        #
-        #       Instead of Q^{pi}(s_t, a_t), we use the total discounted reward summed over 
-        #       entire trajectory (regardless of which time step the Q-value should be for). 
-        #
-        #       For this case, the policy gradient estimator is
-        #
-        #           E_{tau} [sum_{t=0}^T grad log pi(a_t|s_t) * Ret(tau)]
-        #
-        #       where
-        #
-        #           Ret(tau) = sum_{t'=0}^T gamma^t' r_{t'}.
-        #
-        #       Thus, you should compute
-        #
-        #           Q_t = Ret(tau)
-        #
-        #   Case 2: reward-to-go PG 
-        #
-        #       (reward_to_go = True)
-        #
-        #       Here, you estimate Q^{pi}(s_t, a_t) by the discounted sum of rewards starting
-        #       from time step t. Thus, you should compute
-        #
-        #           Q_t = sum_{t'=t}^T gamma^(t'-t) * r_{t'}
-        #
-        #
-        # Store the Q-values for all timesteps and all trajectories in a variable 'q_n',
-        # like the 'ob_no' and 'ac_na' above. 
-        #
-        #====================================================================================#
-
-        # YOUR_CODE_HERE
-        q_n = []
-
-        for path in paths:
-            q = 0
-            q_trajectory = []
-
-            # Calculate reward to go with gamma
-            for reward in reversed(path["reward"]):
-                q = reward + q * gamma
-                q_trajectory.append(q)
-            q_trajectory.reverse()
-            
-            if not reward_to_go:
-                # Replace all Qt with Q0
-                q_trajectory = [q_trajectory[0]] * len(q_trajectory)
-
-            q_n.extend(q_trajectory)
-
-        #====================================================================================#
-        #                           ----------SECTION 5----------
-        # Computing Baselines
-        #====================================================================================#
-
-        if nn_baseline:
-            # If nn_baseline is True, use your neural network to predict reward-to-go
-            # at each timestep for each trajectory, and save the result in a variable 'b_n'
-            # like 'ob_no', 'ac_na', and 'q_n'.
-            #
-            # Hint #bl1: rescale the output from the nn_baseline to match the statistics
-            # (mean and std) of the current or previous batch of Q-values. (Goes with Hint
-            # #bl2 below.)
-
-            # b_n = TODO
-            adv_n = q_n - b_n
-        else:
-            adv_n = q_n.copy()
-
-        #====================================================================================#
-        #                           ----------SECTION 4----------
-        # Advantage Normalization
-        #====================================================================================#
-
-        if normalize_advantages:
-            # On the next line, implement a trick which is known empirically to reduce variance
-            # in policy gradient methods: normalize adv_n to have mean zero and std=1. 
-            # YOUR_CODE_HERE
-            adv_n = (adv_n - np.mean(adv_n)) / (np.std(adv_n) + 1e-8)
-
-
-        #====================================================================================#
-        #                           ----------SECTION 5----------
-        # Optimizing Neural Network Baseline
-        #====================================================================================#
-        if nn_baseline:
-            # ----------SECTION 5----------
-            # If a neural network baseline is used, set up the targets and the inputs for the 
-            # baseline. 
-            # 
-            # Fit it to the current batch in order to use for the next iteration. Use the 
-            # baseline_update_op you defined earlier.
-            #
-            # Hint #bl2: Instead of trying to target raw Q-values directly, rescale the 
-            # targets to have mean zero and std=1. (Goes with Hint #bl1 above.)
-
-            # YOUR_CODE_HERE
-            pass
-
-        #====================================================================================#
-        #                           ----------SECTION 4----------
-        # Performing the Policy Update
-        #====================================================================================#
-
-        # Call the update operation necessary to perform the policy gradient update based on 
-        # the current batch of rollouts.
-        # 
-        # For debug purposes, you may wish to save the value of the loss function before
-        # and after an update, and then log them below. 
-
-        # YOUR_CODE_HERE
-        # _, loss_value = sess.run([update_op, loss], feed_dict={sy_ob_no: ob_no, sy_ac_na: ac_na, sy_adv_n: adv_n})
-        # print(loss_value)
-        model.train(ob_no, ac_na, adv_n)
-
-        # Log diagnostics
-        returns = [path["reward"].sum() for path in paths]
-        ep_lengths = [pathlength(path) for path in paths]
-        logz.log_tabular("Time", time.time() - start)
-        logz.log_tabular("Iteration", itr)
-        logz.log_tabular("AverageReturn", np.mean(returns))
-        logz.log_tabular("StdReturn", np.std(returns))
-        logz.log_tabular("MaxReturn", np.max(returns))
-        logz.log_tabular("MinReturn", np.min(returns))
-        logz.log_tabular("EpLenMean", np.mean(ep_lengths))
-        logz.log_tabular("EpLenStd", np.std(ep_lengths))
-        logz.log_tabular("TimestepsThisBatch", timesteps_this_batch)
-        logz.log_tabular("TimestepsSoFar", total_timesteps)
-        logz.dump_tabular()
-        # logz.pickle_tf_vars()
-
+    mp.set_start_method('spawn')
+    agent = Agent(n_iter, env_name, max_path_length,
+                  logdir, min_timesteps_per_batch, gamma, reward_to_go, nn_baseline, normalize_advantages, ob_dim, ac_dim, discrete, n_layers, size,
+                  learning_rate)
+    agent.start()
+    agent.join()
 
 def main():
     import argparse
@@ -316,29 +108,47 @@ def main():
     for e in range(args.n_experiments):
         seed = args.seed + 10*e
         print('Running experiment with seed %d'%seed)
-        def train_func():
-            train_PG(
-                exp_name=args.exp_name,
-                env_name=args.env_name,
-                n_iter=args.n_iter,
-                gamma=args.discount,
-                min_timesteps_per_batch=args.batch_size,
-                max_path_length=max_path_length,
-                learning_rate=args.learning_rate,
-                reward_to_go=args.reward_to_go,
-                animate=args.render,
-                logdir=os.path.join(logdir,'%d'%seed),
-                normalize_advantages=not(args.dont_normalize_advantages),
-                nn_baseline=args.nn_baseline, 
-                seed=seed,
-                n_layers=args.n_layers,
-                size=args.size
-                )
-        # Awkward hacky process runs, because Tensorflow does not like
-        # repeatedly calling train_PG in the same thread.
-        p = Process(target=train_func, args=tuple())
-        p.start()
-        p.join()
+        # def train_func():
+        #     train_PG(
+        #         exp_name=args.exp_name,
+        #         env_name=args.env_name,
+        #         n_iter=args.n_iter,
+        #         gamma=args.discount,
+        #         min_timesteps_per_batch=args.batch_size,
+        #         max_path_length=max_path_length,
+        #         learning_rate=args.learning_rate,
+        #         reward_to_go=args.reward_to_go,
+        #         animate=args.render,
+        #         logdir=os.path.join(logdir,'%d'%seed),
+        #         normalize_advantages=not(args.dont_normalize_advantages),
+        #         nn_baseline=args.nn_baseline, 
+        #         seed=seed,
+        #         n_layers=args.n_layers,
+        #         size=args.size
+        #         )
+        # # Awkward hacky process runs, because Tensorflow does not like
+        # # repeatedly calling train_PG in the same thread.
+        # p = Process(target=train_func, args=tuple())
+        # p.start()
+        # p.join()
+
+        train_PG(
+            exp_name=args.exp_name,
+            env_name=args.env_name,
+            n_iter=args.n_iter,
+            gamma=args.discount,
+            min_timesteps_per_batch=args.batch_size,
+            max_path_length=max_path_length,
+            learning_rate=args.learning_rate,
+            reward_to_go=args.reward_to_go,
+            animate=args.render,
+            logdir=os.path.join(logdir,'%d'%seed),
+            normalize_advantages=not(args.dont_normalize_advantages),
+            nn_baseline=args.nn_baseline,
+            seed=seed,
+            n_layers=args.n_layers,
+            size=args.size
+            )
         
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import tensorflow as tf
+import time
 
 def build_mlp(
         input_placeholder,
@@ -144,11 +145,40 @@ class PolicyGradient:
         # tf.global_variables_initializer().run(session=self.sess)  # pylint: disable=E1101
     
     def run(self, observations):
+        # print("Running...")
+        # if hasattr(self, "var"):
+        #     self.load_weights(self.var)
+
+        # for v in tf.trainable_variables():
+        #     print(v.name)
+        #     print(type(self.sess.run(v)))
+        # time.sleep(10)
         return self.sess.run(self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
 
     def train(self, observations, actions, advantages):
+        print("Training...")
+
+        # print(self.sess.run("continuous/dense/kernel:0"))
         self.sess.run(self.update_op, 
                       feed_dict={
                           self.sy_ob_no: observations, 
                           self.sy_ac_na: actions, 
                           self.sy_adv_n: advantages})
+        # print(self.sess.run("continuous/dense/kernel:0"))
+        # time.sleep(10)
+
+        # self.var = self.dump_weights()
+
+    def dump_weights(self):
+        print("Dumping weights...")
+        var = {}
+        for v in tf.trainable_variables():
+            var[v.name] = v
+        return var
+    
+    def load_weights(self, var):
+        # print("Loading weights...")
+        for v in tf.trainable_variables():
+            v = var[v.name]
+
+        assert len(var) == len(tf.trainable_variables())
