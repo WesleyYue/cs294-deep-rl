@@ -6,6 +6,7 @@ import numpy as np
 import logz
 import inspect
 import tensorflow as tf
+import enum
 
 # class AgentManager(Process):
 #     def __init__(self, ob_dim, ac_dim, discrete, n_layers, size, learning_rate,
@@ -35,6 +36,12 @@ import tensorflow as tf
 #         pass
 
 class Agent(Process):
+    @enum.unique
+    class AgentStates(enum.Enum):
+        ROLLOUT = enum.auto()
+        WAITING_FOR_PARAMETERS = enum.auto()
+        READY_TO_ROLLOUT = enum.auto()
+
     def __init__(self,
                  exp_name='',  # Not used. Only for the logz convienence
                  env_name='CartPole-v0',
@@ -44,7 +51,7 @@ class Agent(Process):
                  max_path_length=None,
                  learning_rate=5e-3,
                  reward_to_go=True,
-                #  animate=True,
+                 #  animate=True,
                  logdir=None,
                  normalize_advantages=True,
                  nn_baseline=False,
@@ -70,6 +77,8 @@ class Agent(Process):
         self.nn_baseline = nn_baseline
         self.normalize_advantages = normalize_advantages
 
+        self.state = self.AgentStates.WAITING_FOR_PARAMETERS
+
         # Set random seeds
         tf.set_random_seed(seed)
         np.random.seed(seed)
@@ -80,13 +89,51 @@ class Agent(Process):
         # Log experimental parameters
         args = inspect.getargspec(Agent.__init__)[0]
         locals_ = locals()
-        # args[1:] to skip over the 'self' parameter 
+        # args[1:] to skip over the 'self' parameter
         params = {k: locals_[k] if k in locals_ else None for k in args[1:]}
         logz.save_params(params)
 
     # def _run_init(self):
-    #     """Initialization tasks that run in the spawned process instead of the 
+    #     """Initialization tasks that run in the spawned process instead of the
     #     process that is instantiating the class."""
+
+    def rollout(self, env, max_path_length):
+        # Collect paths until we have enough timesteps
+        timesteps_this_batch = 0
+        paths = []
+        enough_timesteps = False
+        while not enough_timesteps:
+            ob = env.reset()
+            obs, acs, rewards = [], [], []
+            # animate_this_episode = (
+            #     len(paths) == 0 and (itr % 10 == 0) and animate)
+            steps = 0
+
+            done_trajectory = False
+            while not done_trajectory:
+                # if animate_this_episode:
+                #     env.render()
+                #     time.sleep(0.05)
+                obs.append(ob)
+                ac = self.model.run(ob)
+                ac = ac[0]
+                acs.append(ac)
+                ob, rew, done, _ = env.step(ac)
+                rewards.append(rew)
+                steps += 1
+
+                done_trajectory = (done or steps > max_path_length)
+
+            path = {"observation": np.array(obs),
+                    "reward": np.array(rewards),
+                    "action": np.array(acs)}
+            paths.append(path)
+            timesteps_this_batch += len(path['reward'])
+
+            enough_timesteps = (timesteps_this_batch >
+                                self.min_timesteps_per_batch)
+        return paths, timesteps_this_batch
+        
 
     def run(self):
         start = time.time()
@@ -137,35 +184,8 @@ class Agent(Process):
         for itr in range(self.n_iter):
             print("********** Iteration %i ************" % itr)
 
-            # Collect paths until we have enough timesteps
-            timesteps_this_batch = 0
-            paths = []
-            while True:
-                ob = env.reset()
-                obs, acs, rewards = [], [], []
-                # animate_this_episode = (
-                #     len(paths) == 0 and (itr % 10 == 0) and animate)
-                steps = 0
-                while True:
-                    # if animate_this_episode:
-                    #     env.render()
-                    #     time.sleep(0.05)
-                    obs.append(ob)
-                    ac = self.model.run(ob)
-                    ac = ac[0]
-                    acs.append(ac)
-                    ob, rew, done, _ = env.step(ac)
-                    rewards.append(rew)
-                    steps += 1
-                    if done or steps > max_path_length:
-                        break
-                path = {"observation": np.array(obs),
-                        "reward": np.array(rewards),
-                        "action": np.array(acs)}
-                paths.append(path)
-                timesteps_this_batch += len(path['reward'])
-                if timesteps_this_batch > self.min_timesteps_per_batch:
-                    break
+            paths, timesteps_this_batch = self.rollout(env, max_path_length)
+
             total_timesteps += timesteps_this_batch
 
             # Build arrays for observation, action for the policy gradient update by concatenating

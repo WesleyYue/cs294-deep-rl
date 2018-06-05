@@ -14,46 +14,6 @@ from distributed import Agent
 # Policy Gradient
 #============================================================================================#
 
-def train_PG(exp_name='',
-             env_name='CartPole-v0',
-             n_iter=100,
-             gamma=1.0,
-             min_timesteps_per_batch=1000,
-             max_path_length=None,
-             learning_rate=5e-3,
-             reward_to_go=True,
-             animate=True,
-             logdir=None,
-             normalize_advantages=True,
-             nn_baseline=False,
-             seed=0,
-             # network arguments
-             n_layers=1,
-             size=32
-             ):
-
-    # agent = Agent(n_iter, env_name, max_path_length,
-    #               logdir, min_timesteps_per_batch, gamma, reward_to_go, nn_baseline, normalize_advantages, n_layers, size,
-    #               learning_rate, seed)
-    agent = Agent(exp_name='',
-                  env_name='CartPole-v0',
-                  n_iter=100,
-                  gamma=1.0,
-                  min_timesteps_per_batch=1000,
-                  max_path_length=None,
-                  learning_rate=5e-3,
-                  reward_to_go=True,
-                  logdir=None,
-                  normalize_advantages=True,
-                  nn_baseline=False,
-                  seed=0,
-                  # network arguments
-                  n_layers=1,
-                  size=32)
-    agent.start()
-    agent.join()
-
-
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -89,23 +49,23 @@ def main():
         seed = args.seed + 10 * e
         print('Running experiment with seed %d' % seed)
 
-        train_PG(
-            exp_name=args.exp_name,
-            env_name=args.env_name,
-            n_iter=args.n_iter,
-            gamma=args.discount,
-            min_timesteps_per_batch=args.batch_size,
-            max_path_length=max_path_length,
-            learning_rate=args.learning_rate,
-            reward_to_go=args.reward_to_go,
-            animate=args.render,
-            logdir=os.path.join(logdir, '%d' % seed),
-            normalize_advantages=not(args.dont_normalize_advantages),
-            nn_baseline=args.nn_baseline,
-            seed=seed,
-            n_layers=args.n_layers,
-            size=args.size
-        )
+        agent = Agent(exp_name=args.exp_name,
+                      env_name=args.env_name,
+                      n_iter=args.n_iter,
+                      gamma=args.discount,
+                      min_timesteps_per_batch=args.batch_size,
+                      max_path_length=max_path_length,
+                      learning_rate=args.learning_rate,
+                      reward_to_go=args.reward_to_go,
+                    #   animate=args.render,
+                      logdir=os.path.join(logdir, '%d' % seed),
+                      normalize_advantages=not(args.dont_normalize_advantages),
+                      nn_baseline=args.nn_baseline,
+                      seed=seed,
+                      n_layers=args.n_layers,
+                      size=args.size)
+        agent.start()
+        agent.join()
 
 
 if __name__ == "__main__":
