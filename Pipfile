@@ -14,6 +14,8 @@ mujoco-py = "*"
 [dev-packages]
 pylint = "*"
 "autopep8" = "*"
+rope = "*"
+yapf = "*"
 
 [requires]
 python_version = "3.6"

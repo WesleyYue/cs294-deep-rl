@@ -1,14 +1,14 @@
 import tensorflow as tf
 import time
 
-def build_mlp(
-        input_placeholder,
-        output_size,
-        scope,
-        n_layers=2,
-        size=64,
-        activation=tf.nn.relu,
-        output_activation=None):
+
+def build_mlp(input_placeholder,
+              output_size,
+              scope,
+              n_layers=2,
+              size=64,
+              activation=tf.nn.relu,
+              output_activation=None):
     #========================================================================================#
     #                           ----------SECTION 3----------
     # Network building
@@ -23,17 +23,35 @@ def build_mlp(
 
     with tf.variable_scope(scope):
         # YOUR_CODE_HERE
-        hidden_layers = [tf.layers.dense(
-            input_placeholder, size, activation=activation)]
+        hidden_layers = [
+            tf.layers.dense(input_placeholder, size, activation=activation)
+        ]
         for layer_n in range(1, n_layers):
-            hidden_layers.append(tf.layers.dense(
-                hidden_layers[layer_n - 1], size, activation=activation))
+            hidden_layers.append(
+                tf.layers.dense(
+                    hidden_layers[layer_n - 1], size, activation=activation))
         output = tf.layers.dense(
-            hidden_layers[n_layers - 1], output_size, activation=output_activation)
+            hidden_layers[n_layers - 1],
+            output_size,
+            activation=output_activation)
         return output
 
+
 class PolicyGradient:
-    def __init__(self, ob_dim, ac_dim, discrete, n_layers, size, learning_rate, nn_baseline):
+    def __init__(self, ob_dim, ac_dim, discrete, n_layers, size, learning_rate,
+                 nn_baseline, tf_scope):  # TODO(wy): Look at removing scope and sharing one PG object
+        """Implementation of policy gradient neural network, with ability to load/dump weights.
+
+        Arguments:
+            ob_dim {integer} -- Observation space dimensions
+            ac_dim {integer} -- Action space dimensions
+            discrete {boolean} -- Whether the actions are discrete
+            n_layers {integer} -- Number of layers in the multi-layer perceptron
+            size {integer} -- Size of each hidden layer in the MLP
+            learning_rate {float} -- Learning rate of the MLP
+            nn_baseline {boolean} -- Whether to use a neural network baseline
+            tf_scope {string} -- Parent scope the tensorflow objects should live in ("manager", "agent1", etc)
+        """
 
         #========================================================================================#
         #                           ----------SECTION 4----------
@@ -45,13 +63,15 @@ class PolicyGradient:
         self.sy_ob_no = tf.placeholder(
             shape=[None, ob_dim], name="ob", dtype=tf.float32)
         if discrete:
-            self.sy_ac_na = tf.placeholder(shape=[None], name="ac", dtype=tf.int32)
+            self.sy_ac_na = tf.placeholder(
+                shape=[None], name="ac", dtype=tf.int32)
         else:
             self.sy_ac_na = tf.placeholder(
                 shape=[None, ac_dim], name="ac", dtype=tf.float32)
 
         # Define a placeholder for advantages
-        self.sy_adv_n = tf.placeholder(shape=[None], name="adv", dtype=tf.float32)
+        self.sy_adv_n = tf.placeholder(
+            shape=[None], name="adv", dtype=tf.float32)
 
         #========================================================================================#
         #                           ----------SECTION 4----------
@@ -95,17 +115,23 @@ class PolicyGradient:
         if discrete:
             sy_logits_na = build_mlp(self.sy_ob_no, ac_dim, scope="discrete")
             # Hint: Use the tf.multinomial op
-            self.sy_sampled_ac = tf.squeeze(tf.multinomial(sy_logits_na, 1), axis=1)
+            self.sy_sampled_ac = tf.squeeze(
+                tf.multinomial(sy_logits_na, 1), axis=1)
             sy_logprob_n = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 labels=self.sy_ac_na, logits=sy_logits_na)
 
         else:
             sy_mean = build_mlp(
-                self.sy_ob_no, ac_dim, scope="continuous", n_layers=n_layers, size=size)
+                self.sy_ob_no,
+                ac_dim,
+                scope="continuous",
+                n_layers=n_layers,
+                size=size)
             # logstd should just be a trainable variable, not a network output.
             sy_logstd = tf.get_variable("logstd", [ac_dim])
             sy_std = tf.exp(sy_logstd)
-            self.sy_sampled_ac = sy_mean + sy_std * tf.random_normal(tf.shape(sy_mean))
+            self.sy_sampled_ac = sy_mean + sy_std * \
+                tf.random_normal(tf.shape(sy_mean))
             # Hint: Use the log probability under a multivariate gaussian.
             sy_logprob_n = 0.5 * \
                 tf.reduce_sum(tf.square(sy_mean - self.sy_ac_na) / sy_std, 1)
@@ -120,30 +146,31 @@ class PolicyGradient:
         #========================================================================================#
 
         if nn_baseline:
-            baseline_prediction = tf.squeeze(build_mlp(
-                self.sy_ob_no,
-                1,
-                "nn_baseline",
-                n_layers=n_layers,
-                size=size))
+            baseline_prediction = tf.squeeze(
+                build_mlp(
+                    self.sy_ob_no,
+                    1,
+                    "nn_baseline",
+                    n_layers=n_layers,
+                    size=size))
             # Define placeholders for targets, a loss function and an update op for fitting a
             # neural network baseline. These will be used to fit the neural network baseline.
             # YOUR_CODE_HERE
             # baseline_update_op = TODO
 
-
         #========================================================================================#
         # Tensorflow Engineering: Config, Session, Variable initialization
         #========================================================================================#
 
-        tf_config = tf.ConfigProto(
-            inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
+        # tf_config = tf.ConfigProto(
+        #     inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
 
-        self.sess = tf.Session(config=tf_config)
+        # self.sess = tf.Session(config=tf_config)
+        self.sess = tf.Session()
         # self.sess.__enter__()  # equivalent to `with sess:`
         self.sess.run(tf.global_variables_initializer())
         # tf.global_variables_initializer().run(session=self.sess)  # pylint: disable=E1101
-    
+
     def run(self, observations):
         # print("Running...")
         # if hasattr(self, "var"):
@@ -153,21 +180,26 @@ class PolicyGradient:
         #     print(v.name)
         #     print(type(self.sess.run(v)))
         # time.sleep(10)
-        return self.sess.run(self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
+        return self.sess.run(
+            self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
 
     def train(self, observations, actions, advantages):
         print("Training...")
 
         # print(self.sess.run("continuous/dense/kernel:0"))
-        self.sess.run(self.update_op, 
-                      feed_dict={
-                          self.sy_ob_no: observations, 
-                          self.sy_ac_na: actions, 
-                          self.sy_adv_n: advantages})
+        self.sess.run(
+            self.update_op,
+            feed_dict={
+                self.sy_ob_no: observations,
+                self.sy_ac_na: actions,
+                self.sy_adv_n: advantages
+            })
         # print(self.sess.run("continuous/dense/kernel:0"))
         # time.sleep(10)
 
         # self.var = self.dump_weights()
+
+        return self.dump_weights()
 
     def dump_weights(self):
         print("Dumping weights...")
@@ -175,7 +207,7 @@ class PolicyGradient:
         for v in tf.trainable_variables():
             var[v.name] = v
         return var
-    
+
     def load_weights(self, var):
         # print("Loading weights...")
         for v in tf.trainable_variables():

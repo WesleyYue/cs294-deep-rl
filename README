@@ -1,0 +1,8 @@
+# Pipenv for proper python environment
+
+pipenv shell
+
+# Activate jupyter notebook for logs
+
+jupyter notebook 
+

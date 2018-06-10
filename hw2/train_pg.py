@@ -1,14 +1,16 @@
-import numpy as np
-import tensorflow as tf
-import gym
-import logz
-import scipy.signal
+import inspect
+import multiprocessing
 import os
 import time
-import inspect
-from model import PolicyGradient
-from distributed import Agent
 
+import gym
+import numpy as np
+import scipy.signal
+import tensorflow as tf
+
+import logz
+from agent import Agent
+from manager import Manager
 
 #============================================================================================#
 # Policy Gradient
@@ -49,9 +51,9 @@ def main():
         seed = args.seed + 10 * e
         print('Running experiment with seed %d' % seed)
 
-        agent = Agent(exp_name=args.exp_name,
+        manager = Manager(exp_name=args.exp_name,
                       env_name=args.env_name,
-                      n_iter=args.n_iter,
+                      epoches=args.n_iter,
                       gamma=args.discount,
                       min_timesteps_per_batch=args.batch_size,
                       max_path_length=max_path_length,
@@ -63,9 +65,10 @@ def main():
                       nn_baseline=args.nn_baseline,
                       seed=seed,
                       n_layers=args.n_layers,
-                      size=args.size)
-        agent.start()
-        agent.join()
+                      size=args.size,
+                      num_agents=1)
+        manager.start()
+        manager.join()
 
 
 if __name__ == "__main__":
