@@ -1,5 +1,10 @@
-import tensorflow as tf
+import logging
 import time
+from pprint import pprint
+
+import tensorflow as tf
+
+logger = logging.getLogger(__name__)
 
 
 def build_mlp(input_placeholder,
@@ -50,7 +55,7 @@ class PolicyGradient:
             size {integer} -- Size of each hidden layer in the MLP
             learning_rate {float} -- Learning rate of the MLP
             nn_baseline {boolean} -- Whether to use a neural network baseline
-            tf_scope {string} -- Parent scope the tensorflow objects should live in ("manager", "agent1", etc)
+            tf_scope {string} -- Parent scope the tensorflow objects should live in ("supervisor", "agent1", etc)
         """
 
         #========================================================================================#
@@ -184,7 +189,7 @@ class PolicyGradient:
             self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
 
     def train(self, observations, actions, advantages):
-        print("Training...")
+        logger.debug("Training...")
 
         # print(self.sess.run("continuous/dense/kernel:0"))
         self.sess.run(
@@ -202,15 +207,15 @@ class PolicyGradient:
         return self.dump_weights()
 
     def dump_weights(self):
-        print("Dumping weights...")
-        var = {}
+        logger.debug("Dumping weights...")
+        weights = {}
         for v in tf.trainable_variables():
-            var[v.name] = v
-        return var
+            weights[v.name] = self.sess.run(v)
+        return weights
 
-    def load_weights(self, var):
-        # print("Loading weights...")
+    def load_weights(self, weights):
+        logger.debug("Loading weights...")
         for v in tf.trainable_variables():
-            v = var[v.name]
+            self.sess.run(tf.assign(v, weights[v.name]))
 
-        assert len(var) == len(tf.trainable_variables())
+        assert len(weights) == len(tf.trainable_variables())

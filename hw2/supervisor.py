@@ -2,6 +2,7 @@ import enum
 import inspect
 import multiprocessing as mp
 import time
+import logging
 
 import gym
 import numpy as np
@@ -10,6 +11,9 @@ import tensorflow as tf
 import logz
 from model import PolicyGradient
 from agent import Agent
+
+logger = logging.getLogger(__name__)
+
 
 #region notation definition
 #========================================================================================#
@@ -31,9 +35,9 @@ from agent import Agent
 #endregion
 
 
-class Manager(mp.Process):
+class Supervisor(mp.Process):
     @enum.unique
-    class AgentStates(enum.Enum):
+    class States(enum.Enum):
         ROLLOUT = enum.auto()
         WAITING_FOR_PARAMETERS = enum.auto()
         READY_TO_ROLLOUT = enum.auto()
@@ -56,7 +60,7 @@ class Manager(mp.Process):
             # network arguments
             n_layers=1,
             size=32,
-            num_agents=0):
+            num_agents=1):
 
         if num_agents < 1:
             raise ValueError("Need at least 1 agent to do the rollout")
@@ -80,7 +84,8 @@ class Manager(mp.Process):
         self.nn_baseline = nn_baseline
         self.normalize_advantages = normalize_advantages
 
-        self.state = self.AgentStates.WAITING_FOR_PARAMETERS
+        self.state = self.States.WAITING_FOR_PARAMETERS
+        self.num_agents = num_agents
 
         tf.set_random_seed(seed)
         np.random.seed(seed)
@@ -96,48 +101,54 @@ class Manager(mp.Process):
     def run(self):
         start = time.time()
 
-        env = gym.make(self.env_name)
+        # Initialize students processes that will perform the rollouts
+        results = mp.Queue()
+        paths_queue = mp.Queue()
+        agent_state = mp.JoinableQueue()  # Synchronize state of all agents
+        network_weights = mp.Queue()
 
-        discrete = isinstance(env.action_space, gym.spaces.Discrete)
+        # 1 = rollout
+        # 2 = train
+        # 3 = load weights
 
-        # Observation and action sizes
-        ob_dim = env.observation_space.shape[0]
-        ac_dim = env.action_space.n if discrete else env.action_space.shape[0]
+        agents = []
+
+        for _ in range(self.num_agents):
+            agents.append(
+                Agent(self.env_name, self.gamma, self.min_timesteps_per_batch,
+                      self.max_path_length, self.reward_to_go,
+                      self.normalize_advantages, self.nn_baseline, self.seed,
+                      self.network_parameters, results, agent_state,
+                      network_weights, paths_queue, self.num_agents))
+
+        for agent in agents:
+            agent.start()
 
         for itr in range(self.epoches):
             print("********** Epoch %i ************" % itr)
 
-            # Initialize students processes that will perform the rollouts
-            results = mp.Queue()
-            agent_state = mp.Value("i")
+            for _ in range(self.num_agents):
+                agent_state.put(Agent.States.ROLLOUT)
+            agent_state.join()
 
-            # 1 = rollout
-            # 2 = train
-            # 3 = load weights
+            paths = []
+            for _ in range(self.num_agents):
+                paths.extend(paths_queue.get())
 
-            self.agents = [
-                Agent(self.env_name, self.gamma, self.min_timesteps_per_batch,
-                      self.max_path_length, self.reward_to_go,
-                      self.normalize_advantages, self.nn_baseline, self.seed,
-                      self.network_parameters, results, agent_state)
-            ]
+            # There should be only /num_agents/ instances of /path/ appeneded 
+            # to the /paths_queue/
+            assert paths_queue.empty()
 
-            self.agents[0].start()
+            agent_state.put(Agent.States.TRAIN)
+            # time.sleep(0.1) # TODO(wy): fix the synchronization hack to prevent update task being fetched and completed before training
+            agent_state.join()
 
-            result = results.get()
-            # weights = self.agents[0].train(
-            #     result["observations"], result["actions"], result["advantage"])
-            
-            # for agent in self.agents:
-            #     agent.load_weights(weights)
-
-            self.agents[0].join()
-
-            # self.model.train(result["observations"], result["actions"], result["advantage"])
+            agent_state.put(Agent.States.UPDATE)
+            agent_state.join()
 
             # Log diagnostics
-            returns = [path["reward"].sum() for path in result["paths"]]
-            ep_lengths = [len(path["reward"]) for path in result["paths"]]
+            returns = [path["reward"].sum() for path in paths]
+            ep_lengths = [len(path["reward"]) for path in paths]
             logz.log_tabular("Time", time.time() - start)
             logz.log_tabular("Iteration", itr)
             logz.log_tabular("AverageReturn", np.mean(returns))
@@ -150,3 +161,13 @@ class Manager(mp.Process):
             # logz.log_tabular("TimestepsSoFar", total_timesteps)
             logz.dump_tabular()
             # logz.pickle_tf_vars()
+
+        for _ in range(self.num_agents):
+            agent_state.put(Agent.States.TERMINATE)
+
+        agent_state.join()
+
+        logger.debug("joining agents")
+        for agent in agents:
+            logger.debug("joining agent")
+            agent.join()

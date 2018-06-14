@@ -10,7 +10,16 @@ import tensorflow as tf
 
 import logz
 from agent import Agent
-from manager import Manager
+from supervisor import Supervisor
+
+import logging
+import sys
+logging.basicConfig(
+    level=logging.INFO,
+    format=
+    "[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stdout)
 
 #============================================================================================#
 # Policy Gradient
@@ -51,7 +60,7 @@ def main():
         seed = args.seed + 10 * e
         print('Running experiment with seed %d' % seed)
 
-        manager = Manager(exp_name=args.exp_name,
+        supervisor = Supervisor(exp_name=args.exp_name,
                       env_name=args.env_name,
                       epoches=args.n_iter,
                       gamma=args.discount,
@@ -66,9 +75,9 @@ def main():
                       seed=seed,
                       n_layers=args.n_layers,
                       size=args.size,
-                      num_agents=1)
-        manager.start()
-        manager.join()
+                      num_agents=2)
+        supervisor.start()
+        supervisor.join()
 
 
 if __name__ == "__main__":
