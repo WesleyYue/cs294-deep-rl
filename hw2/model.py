@@ -44,7 +44,7 @@ def build_mlp(input_placeholder,
 
 class PolicyGradient:
     def __init__(self, ob_dim, ac_dim, discrete, n_layers, size, learning_rate,
-                 nn_baseline, tf_scope):  # TODO(wy): Look at removing scope and sharing one PG object
+                 nn_baseline):
         """Implementation of policy gradient neural network, with ability to load/dump weights.
 
         Arguments:
@@ -55,7 +55,6 @@ class PolicyGradient:
             size {integer} -- Size of each hidden layer in the MLP
             learning_rate {float} -- Learning rate of the MLP
             nn_baseline {boolean} -- Whether to use a neural network baseline
-            tf_scope {string} -- Parent scope the tensorflow objects should live in ("supervisor", "agent1", etc)
         """
 
         #========================================================================================#

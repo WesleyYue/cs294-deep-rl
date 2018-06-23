@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 def _agent_debug(debug_msg):
     logger.debug("Agent" + str(os.getpid()) + debug_msg)
 
+
 class Agent(mp.Process):
     @enum.unique
     class States(enum.Enum):
@@ -52,7 +53,7 @@ class Agent(mp.Process):
         self.network_parameters = network_parameters
         self.env_name = env_name
         self.max_path_length = max_path_length
-        self.min_timesteps_per_batch = min_timesteps_per_batch
+        self.min_timesteps_per_batch = min_timesteps_per_batch / num_agents
 
         self.gamma = gamma
         self.reward_to_go = reward_to_go
@@ -70,19 +71,20 @@ class Agent(mp.Process):
         # num_agents, during training state. Probably better to just remove this
         # parameter and loop until results empty.
         self.num_agents = num_agents
+        self.env = None  # Gym environment
 
         tf.set_random_seed(seed)
         np.random.seed(seed)
 
+        self._model = None
 
-
-    def _simulate(self, env, max_path_length):
+    def _simulate(self):
         # Collect paths until we have enough timesteps
         timesteps_this_batch = 0
         paths = []
         enough_timesteps = False
         while not enough_timesteps:
-            ob = env.reset()
+            ob = self.env.reset()
             obs, acs, rewards = [], [], []
             # animate_this_episode = (
             #     len(paths) == 0 and (itr % 10 == 0) and animate)
@@ -97,11 +99,11 @@ class Agent(mp.Process):
                 ac = self.model.run(ob)
                 ac = ac[0]
                 acs.append(ac)
-                ob, rew, done, _ = env.step(ac)
+                ob, rew, done, _ = self.env.step(ac)
                 rewards.append(rew)
                 steps += 1
 
-                done_trajectory = (done or steps > max_path_length)
+                done_trajectory = (done or steps > self.max_path_length)
 
             path = {
                 "observation": np.array(obs),
@@ -115,10 +117,10 @@ class Agent(mp.Process):
                                 self.min_timesteps_per_batch)
         return paths, timesteps_this_batch
 
-    def _rollout(self, env, max_path_length):
+    def _rollout(self):
         total_timesteps = 0
 
-        paths, timesteps_this_batch = self._simulate(env, max_path_length)
+        paths, timesteps_this_batch = self._simulate()
 
         total_timesteps += timesteps_this_batch
 
@@ -204,31 +206,49 @@ class Agent(mp.Process):
         self.paths_queue.put(paths)
 
     def run(self):
-        env = gym.make(self.env_name)
+        # Remapped so tests don't need to actually spawn new processes
+        self._main()
 
-        discrete = isinstance(env.action_space, gym.spaces.Discrete)
+    def _setup(self):
+        """Initial setup code when process first spawns."""
+
+        self.env = gym.make(self.env_name)
+
+        discrete = isinstance(self.env.action_space, gym.spaces.Discrete)
 
         # Maximum length for episodes
-        max_path_length = self.max_path_length or env.spec.max_episode_steps
+        self.max_path_length = self.max_path_length or self.env.spec.max_episode_steps
 
         # Observation and action sizes
-        ob_dim = env.observation_space.shape[0]
-        ac_dim = env.action_space.n if discrete else env.action_space.shape[0]
+        ob_dim = self.env.observation_space.shape[0]
+        ac_dim = self.env.action_space.n if discrete else self.env.action_space.shape[0]
 
         self.model = PolicyGradient(
             ob_dim, ac_dim, discrete, self.network_parameters["n_layers"],
             self.network_parameters["size"],
-            self.network_parameters["learning_rate"], self.nn_baseline, "agent"
-        )  # TODO(wy): this needs to be numbered when there are more than 1 agents
+            self.network_parameters["learning_rate"], self.nn_baseline)
 
+    def _main(self):
+        self._setup()
+
+        prev_state = None
         while True:
             # _agent_debug(" getting new task.")
             state = self.state_queue.get()
 
             if state is Agent.States.ROLLOUT:
                 _agent_debug(".ROLLOUT")
-                self._rollout(env, max_path_length)
+                self._rollout()
+
+
+                # Block the system state from transitioning until all agents
+                # have picked up a ROLLOUT task. This prevents an agent that has
+                # picked up a ROLLOUT task from picking up a second ROLLOUT task
+                # until the agent transitions to another state.
+                while not self.state_queue.empty():
+                    pass
                 self.state_queue.task_done()
+                prev_state = Agent.States.ROLLOUT
 
             elif state is Agent.States.TRAIN:
                 _agent_debug(".TRAIN")
@@ -245,18 +265,34 @@ class Agent(mp.Process):
                     advantages.extend(results["advantages"])
 
                 assert self.results.empty()
-                self.network_weights.put(
-                    self.model.train(observations, actions, advantages))
+
+                weights = self.model.train(observations, actions, advantages)
+
+                # Not ideal b/c need to put duplicate sets of weights on queue
+                # for each agent. TODO(wy)
+                for _ in range(self.num_agents):
+                    self.network_weights.put(weights)
                 self.state_queue.task_done()
+                prev_state = Agent.States.TRAIN
 
             elif state is Agent.States.UPDATE:
-                # TODO(wy): Implement logic to not update if there is only one thread since the training should have already updated the weights simultanenously
+                # TODO(wy): Implement logic to not update if there is only one
+                # thread since the training should have already updated the
+                # weights simultanenously
                 _agent_debug(".UDPATE")
+
+                # Check that agent is not taking two UPDATE tasks in one epoch
+                assert prev_state is not Agent.States.UPDATE
+
                 self._load_weights(self.network_weights.get())
 
-                # TODO(wy): think about how to implement FSM logic to prevent an agent from picking up the same task twice
-                #           probably need semaphores
+                # Hack to reduce the probability that the same agent picks up
+                # UPDATE again, before another agent who was supposed to be
+                # updated got a chance.
+                time.sleep(0.1)
+
                 self.state_queue.task_done()
+                prev_state = Agent.States.UPDATE
 
             elif state is Agent.States.TERMINATE:
                 _agent_debug(".TERMINATE")
@@ -264,7 +300,7 @@ class Agent(mp.Process):
                 assert self.results.empty()
                 assert self.network_weights.empty()
                 assert self.paths_queue.empty()
-                assert self.state_queue.empty()
+                prev_state = Agent.States.TERMINATE
                 break
 
             else:
@@ -300,5 +336,3 @@ class Agent(mp.Process):
     def _load_weights(self, weights):
         self.model.load_weights(weights)
 
-
-#

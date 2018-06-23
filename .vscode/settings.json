@@ -1,5 +1,15 @@
 {
     "python.pythonPath": "/Users/wesley/.virtualenvs/homework-D6bsV7pH/bin/python",
     "C_Cpp.intelliSenseEngineFallback": "Enabled",
-    "python.linting.enabled": true
+    "python.linting.enabled": true,
+    "python.unitTest.unittestArgs": [
+        "-v",
+        "-s",
+        "./hw2",
+        "-p",
+        "test_*.py"
+    ],
+    "python.unitTest.pyTestEnabled": false,
+    "python.unitTest.nosetestsEnabled": false,
+    "python.unitTest.unittestEnabled": true
 }

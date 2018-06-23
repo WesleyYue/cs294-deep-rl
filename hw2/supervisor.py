@@ -1,16 +1,16 @@
 import enum
 import inspect
+import logging
 import multiprocessing as mp
 import time
-import logging
 
 import gym
 import numpy as np
 import tensorflow as tf
 
 import logz
-from model import PolicyGradient
 from agent import Agent
+from model import PolicyGradient
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,9 @@ class Supervisor(mp.Process):
         ROLLOUT = enum.auto()
         WAITING_FOR_PARAMETERS = enum.auto()
         READY_TO_ROLLOUT = enum.auto()
+
+    # class DoubleBoundedSempahore(BoundedSemaphore):
+        
 
     def __init__(
             self,
@@ -107,6 +110,10 @@ class Supervisor(mp.Process):
         agent_state = mp.JoinableQueue()  # Synchronize state of all agents
         network_weights = mp.Queue()
 
+        # Semaphore to prevent agents picking up and transitioning the same
+        # state /x/ while it is in state /x/
+
+
         # 1 = rollout
         # 2 = train
         # 3 = load weights
@@ -140,10 +147,13 @@ class Supervisor(mp.Process):
             assert paths_queue.empty()
 
             agent_state.put(Agent.States.TRAIN)
-            # time.sleep(0.1) # TODO(wy): fix the synchronization hack to prevent update task being fetched and completed before training
             agent_state.join()
 
-            agent_state.put(Agent.States.UPDATE)
+            # Not ideal because the trainer which already has updated weights
+            # will also concidentally pick up an UDPATE task for ease of 
+            # implementation. TODO(wy)
+            for _ in range(self.num_agents):
+                agent_state.put(Agent.States.UPDATE)
             agent_state.join()
 
             # Log diagnostics

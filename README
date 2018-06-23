@@ -1,3 +1,11 @@
+# Setup environment from clean OS
+Sudo apt install python-pip3
+pip3 install pipenv
+pipenv install tensorflow==1.8.*
+Add export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/wesley/.mujoco/mjpro150/bin to ~/.bashrc
+
+
+
 # Pipenv for proper python environment
 
 pipenv shell
