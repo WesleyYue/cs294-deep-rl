@@ -14,20 +14,20 @@ def build_mlp(input_placeholder,
               size=64,
               activation=tf.nn.relu,
               output_activation=None):
-    #========================================================================================#
+    #==========================================================================#
     #                           ----------SECTION 3----------
     # Network building
     #
-    # Your code should make a feedforward neural network (also called a multilayer perceptron)
-    # with 'n_layers' hidden layers of size 'size' units.
+    # Your code should make a feedforward neural network (also called a
+    # multilayer perceptron) with 'n_layers' hidden layers of size 'size' units.
     #
-    # The output layer should have size 'output_size' and activation 'output_activation'.
+    # The output layer should have size 'output_size' and activation
+    # 'output_activation'.
     #
     # Hint: use tf.layers.dense
-    #========================================================================================#
+    #==========================================================================#
 
     with tf.variable_scope(scope):
-        # YOUR_CODE_HERE
         hidden_layers = [
             tf.layers.dense(input_placeholder, size, activation=activation)
         ]
@@ -144,53 +144,57 @@ class PolicyGradient:
         loss = tf.reduce_mean(sy_logprob_n * self.sy_adv_n)
         self.update_op = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
-        #========================================================================================#
+        #======================================================================#
         #                           ----------SECTION 5----------
         # Optional Baseline
-        #========================================================================================#
+        #======================================================================#
 
         if nn_baseline:
-            baseline_prediction = tf.squeeze(
+            self.baseline_prediction = tf.squeeze(
                 build_mlp(
                     self.sy_ob_no,
                     1,
                     "nn_baseline",
                     n_layers=n_layers,
                     size=size))
-            # Define placeholders for targets, a loss function and an update op for fitting a
-            # neural network baseline. These will be used to fit the neural network baseline.
-            # YOUR_CODE_HERE
-            # baseline_update_op = TODO
+            # Define placeholders for targets, a loss function and an update op
+            # for fitting a neural network baseline. These will be used to fit
+            # the neural network baseline.
 
-        #========================================================================================#
-        # Tensorflow Engineering: Config, Session, Variable initialization
-        #========================================================================================#
+            self.sy_q_n = tf.placeholder(
+                shape=[None], name="q", dtype=tf.float32)
+            baseline_loss = tf.losses.mean_squared_error(
+                self.sy_q_n, self.baseline_prediction)
+            self.baseline_update_op = tf.train.AdamOptimizer(
+                learning_rate).minimize(baseline_loss)
 
-        # tf_config = tf.ConfigProto(
-        #     inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
-
-        # self.sess = tf.Session(config=tf_config)
         self.sess = tf.Session()
-        # self.sess.__enter__()  # equivalent to `with sess:`
         self.sess.run(tf.global_variables_initializer())
-        # tf.global_variables_initializer().run(session=self.sess)  # pylint: disable=E1101
 
     def run(self, observations):
-        # print("Running...")
-        # if hasattr(self, "var"):
-        #     self.load_weights(self.var)
-
-        # for v in tf.trainable_variables():
-        #     print(v.name)
-        #     print(type(self.sess.run(v)))
-        # time.sleep(10)
         return self.sess.run(
             self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
+
+    def predict_baseline(self, observations):
+        # TODO(wy): Breakout baseline prediction as its own class
+        # Output distribution should already be normalized from training
+        return self.sess.run(
+            self.baseline_prediction,
+            feed_dict={self.sy_ob_no: observations})
+
+    def train_baseline(self, observations, baseline_predictions,
+                       normalized_q_n):
+        self.sess.run(
+            self.baseline_update_op,
+            feed_dict={
+                self.sy_ob_no: observations,
+                self.sy_q_n: normalized_q_n,
+                self.baseline_prediction: baseline_predictions
+            })
 
     def train(self, observations, actions, advantages):
         logger.debug("Training...")
 
-        # print(self.sess.run("continuous/dense/kernel:0"))
         self.sess.run(
             self.update_op,
             feed_dict={
@@ -198,10 +202,6 @@ class PolicyGradient:
                 self.sy_ac_na: actions,
                 self.sy_adv_n: advantages
             })
-        # print(self.sess.run("continuous/dense/kernel:0"))
-        # time.sleep(10)
-
-        # self.var = self.dump_weights()
 
         return self.dump_weights()
 

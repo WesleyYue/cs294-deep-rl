@@ -96,7 +96,7 @@ class Agent(mp.Process):
                 #     env.render()
                 #     time.sleep(0.05)
                 obs.append(ob)
-                ac = self.model.run(ob)
+                ac = self._model.run(ob)
                 ac = ac[0]
                 acs.append(ac)
                 ob, rew, done, _ = self.env.step(ac)
@@ -137,19 +137,22 @@ class Agent(mp.Process):
         # Computing Baselines
         #====================================================================================#
 
+        baseline_prediction = []
         if self.nn_baseline:
-            # If nn_baseline is True, use your neural network to predict reward-to-go
-            # at each timestep for each trajectory, and save the result in a variable 'b_n'
-            # like 'ob_no', 'ac_na', and 'q_n'.
+            # If nn_baseline is True, use your neural network to predict
+            # Q-value at each timestep for each trajectory, and save the
+            # result in a variable 'b_n' like 'ob_no', 'ac_na', and 'q_n'.
             #
-            # Hint #bl1: rescale the output from the nn_baseline to match the statistics
-            # (mean and std) of the current or previous batch of Q-values. (Goes with Hint
-            # #bl2 below.)
+            # Hint #bl1: rescale the output from the nn_baseline to match the
+            # statistics (mean and std) of the current or previous batch of
+            # Q-values. (Goes with Hint #bl2 below.)
 
-            # b_n = TODO
-            # adv_n = q_n - b_n
+            # baseline_prediciton should already be normally distributed
+            baseline_prediction = self._model.predict_baseline(ob_no)
 
-            adv_n = q_n.copy()  # TODO(wesley): remove this
+            # Scale to q_n statistics
+            b_n = np.mean(q_n) + baseline_prediction * np.std(q_n)
+            adv_n = q_n - b_n
         else:
             adv_n = q_n.copy()
 
@@ -159,39 +162,41 @@ class Agent(mp.Process):
         #====================================================================================#
 
         if self.normalize_advantages:
-            # On the next line, implement a trick which is known empirically to reduce variance
-            # in policy gradient methods: normalize adv_n to have mean zero and std=1.
+            # On the next line, implement a trick which is known empirically to
+            # reduce variance in policy gradient methods: normalize adv_n to
+            # have mean zero and std=1.
             adv_n = (adv_n - np.mean(adv_n)) / (np.std(adv_n) + 1e-8)
 
         #====================================================================================#
         #                           ----------SECTION 5----------
         # Optimizing Neural Network Baseline
         #====================================================================================#
+        normalize_q_n = []
         if self.nn_baseline:
             # ----------SECTION 5----------
-            # If a neural network baseline is used, set up the targets and the inputs for the
-            # baseline.
+            # If a neural network baseline is used, set up the targets and the
+            # inputs for the baseline.
             #
-            # Fit it to the current batch in order to use for the next iteration. Use the
-            # baseline_update_op you defined earlier.
+            # Fit it to the current batch in order to use for the next
+            # iteration. Use the baseline_update_op you defined earlier.
             #
-            # Hint #bl2: Instead of trying to target raw Q-values directly, rescale the
-            # targets to have mean zero and std=1. (Goes with Hint #bl1 above.)
+            # Hint #bl2: Instead of trying to target raw Q-values directly,
+            # rescale the targets to have mean zero and std=1. (Goes with Hint
+            # #bl1 above.)
 
-            # YOUR_CODE_HERE
-            pass
+            normalize_q_n = q_n / np.std(q_n) - np.mean(q_n)
 
         #====================================================================================#
         #                           ----------SECTION 4----------
         # Performing the Policy Update
         #====================================================================================#
 
-        # Call the update operation necessary to perform the policy gradient update based on
-        # the current batch of rollouts.
+        # Call the update operation necessary to perform the policy gradient
+        # update based on the current batch of rollouts.
         #
-        # For debug purposes, you may wish to save the value of the loss function before
-        # and after an update, and then log them below.
-        #endregion
+        # For debug purposes, you may wish to save the value of the loss
+        # function before and after an update, and then log them below.
+        # endregion
 
         # The observations, actions, and advantages are put in the same queue
         # instead of their own separate queues to ensure the correct
@@ -201,7 +206,9 @@ class Agent(mp.Process):
         self.results.put({
             "observations": ob_no,
             "actions": ac_na,
-            "advantages": adv_n
+            "advantages": adv_n,
+            "normalized_q_n": normalize_q_n,
+            "baseline_prediction": baseline_prediction
         })
         self.paths_queue.put(paths)
 
@@ -221,9 +228,10 @@ class Agent(mp.Process):
 
         # Observation and action sizes
         ob_dim = self.env.observation_space.shape[0]
-        ac_dim = self.env.action_space.n if discrete else self.env.action_space.shape[0]
+        ac_dim = self.env.action_space.n if discrete else self.env.action_space.shape[
+            0]
 
-        self.model = PolicyGradient(
+        self._model = PolicyGradient(
             ob_dim, ac_dim, discrete, self.network_parameters["n_layers"],
             self.network_parameters["size"],
             self.network_parameters["learning_rate"], self.nn_baseline)
@@ -239,7 +247,6 @@ class Agent(mp.Process):
             if state is Agent.States.ROLLOUT:
                 _agent_debug(".ROLLOUT")
                 self._rollout()
-
 
                 # Block the system state from transitioning until all agents
                 # have picked up a ROLLOUT task. This prevents an agent that has
@@ -258,15 +265,22 @@ class Agent(mp.Process):
                 observations = []
                 actions = []
                 advantages = []
+                normalized_q_n = []
+                baseline_prediction = []
                 for _ in range(self.num_agents):
                     results = self.results.get()
                     observations.extend(results["observations"])
                     actions.extend(results["actions"])
                     advantages.extend(results["advantages"])
+                    normalized_q_n.extend(results["normalized_q_n"])
+                    baseline_prediction.extend(results["baseline_prediction"])
 
                 assert self.results.empty()
 
-                weights = self.model.train(observations, actions, advantages)
+                if self.nn_baseline:
+                    self._model.train_baseline(
+                        observations, baseline_prediction, normalized_q_n)
+                weights = self._model.train(observations, actions, advantages)
 
                 # Not ideal b/c need to put duplicate sets of weights on queue
                 # for each agent. TODO(wy)
@@ -331,8 +345,7 @@ class Agent(mp.Process):
         return q_n
 
     def _train(self, observations, actions, advantages):
-        return self.model.train(observations, actions, advantages)
+        return self._model.train(observations, actions, advantages)
 
     def _load_weights(self, weights):
-        self.model.load_weights(weights)
-
+        self._model.load_weights(weights)
