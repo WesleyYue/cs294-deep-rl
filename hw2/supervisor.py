@@ -42,9 +42,6 @@ class Supervisor(mp.Process):
         WAITING_FOR_PARAMETERS = enum.auto()
         READY_TO_ROLLOUT = enum.auto()
 
-    # class DoubleBoundedSempahore(BoundedSemaphore):
-        
-
     def __init__(
             self,
             exp_name='',  # Not used. Only for the logz convienence
@@ -104,22 +101,13 @@ class Supervisor(mp.Process):
     def run(self):
         start = time.time()
 
-        # Initialize students processes that will perform the rollouts
         results = mp.Queue()
         paths_queue = mp.Queue()
         agent_state = mp.JoinableQueue()  # Synchronize state of all agents
         network_weights = mp.Queue()
 
-        # Semaphore to prevent agents picking up and transitioning the same
-        # state /x/ while it is in state /x/
-
-
-        # 1 = rollout
-        # 2 = train
-        # 3 = load weights
-
+        # Initialize students processes that will perform the rollouts
         agents = []
-
         for _ in range(self.num_agents):
             agents.append(
                 Agent(self.env_name, self.gamma, self.min_timesteps_per_batch,
@@ -142,7 +130,7 @@ class Supervisor(mp.Process):
             for _ in range(self.num_agents):
                 paths.extend(paths_queue.get())
 
-            # There should be only /num_agents/ instances of /path/ appeneded 
+            # There should be only /num_agents/ instances of /path/ appeneded
             # to the /paths_queue/
             assert paths_queue.empty()
 
@@ -150,7 +138,7 @@ class Supervisor(mp.Process):
             agent_state.join()
 
             # Not ideal because the trainer which already has updated weights
-            # will also concidentally pick up an UDPATE task for ease of 
+            # will also concidentally pick up an UDPATE task for ease of
             # implementation. TODO(wy)
             for _ in range(self.num_agents):
                 agent_state.put(Agent.States.UPDATE)

@@ -96,7 +96,7 @@ class Agent(mp.Process):
                 #     env.render()
                 #     time.sleep(0.05)
                 obs.append(ob)
-                ac = self._model.run(ob)
+                ac = self._model.run_agent(ob)
                 ac = ac[0]
                 acs.append(ac)
                 ob, rew, done, _ = self.env.step(ac)
@@ -280,7 +280,7 @@ class Agent(mp.Process):
                 if self.nn_baseline:
                     self._model.train_baseline(
                         observations, baseline_prediction, normalized_q_n)
-                weights = self._model.train(observations, actions, advantages)
+                weights = self._model.train_agent(observations, actions, advantages)
 
                 # Not ideal b/c need to put duplicate sets of weights on queue
                 # for each agent. TODO(wy)
@@ -345,7 +345,7 @@ class Agent(mp.Process):
         return q_n
 
     def _train(self, observations, actions, advantages):
-        return self._model.train(observations, actions, advantages)
+        return self._model.train_agent(observations, actions, advantages)
 
     def _load_weights(self, weights):
         self._model.load_weights(weights)

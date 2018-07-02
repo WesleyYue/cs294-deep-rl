@@ -171,7 +171,7 @@ class PolicyGradient:
         self.sess = tf.Session()
         self.sess.run(tf.global_variables_initializer())
 
-    def run(self, observations):
+    def run_agent(self, observations):
         return self.sess.run(
             self.sy_sampled_ac, feed_dict={self.sy_ob_no: observations[None]})
 
@@ -179,8 +179,7 @@ class PolicyGradient:
         # TODO(wy): Breakout baseline prediction as its own class
         # Output distribution should already be normalized from training
         return self.sess.run(
-            self.baseline_prediction,
-            feed_dict={self.sy_ob_no: observations})
+            self.baseline_prediction, feed_dict={self.sy_ob_no: observations})
 
     def train_baseline(self, observations, baseline_predictions,
                        normalized_q_n):
@@ -192,7 +191,7 @@ class PolicyGradient:
                 self.baseline_prediction: baseline_predictions
             })
 
-    def train(self, observations, actions, advantages):
+    def train_agent(self, observations, actions, advantages):
         logger.debug("Training...")
 
         self.sess.run(
