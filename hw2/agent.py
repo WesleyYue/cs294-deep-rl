@@ -46,7 +46,8 @@ class Agent(mp.Process):
             state=None,
             network_weights=None,
             paths_queue=None,
-            num_agents=1):  # TODO(wy): fix this constructor argument mess
+            num_agents=1,
+            async_transitions=False):  # TODO(wy): fix this constructor argument mess
 
         mp.Process.__init__(self)
 
@@ -72,6 +73,14 @@ class Agent(mp.Process):
         # parameter and loop until results empty.
         self.num_agents = num_agents
         self.env = None  # Gym environment
+        
+        # Whether FSM transitions are controlled by the outside (synchronous
+        # agent updates)
+        self.async_transitions = async_transitions
+
+        self.epoch_since_last_sync: int = 1
+
+        self.EPOCHES_PER_SYNC: int = 5
 
         tf.set_random_seed(seed)
         np.random.seed(seed)
@@ -212,9 +221,21 @@ class Agent(mp.Process):
         })
         self.paths_queue.put(paths)
 
-    def run(self):
-        # Remapped so tests don't need to actually spawn new processes
-        self._main()
+    def get_state_transition(self, prev_state) -> 'Agent.States':
+        # State transitions are controlled by supervisor (parameter server)
+        # through the state_queue
+        if not self.async_transitions:
+            return self.state_queue.get()
+
+        if prev_state is None:
+            return Agent.States.ROLLOUT
+        elif prev_state is Agent.States.ROLLOUT:
+            return Agent.States.TRAIN
+        elif prev_state is Agent.States.TRAIN:
+            return Agent.States.UPDATE
+        elif prev_state is Agent.States.UPDATE:
+            return Agent.States.ROLLOUT
+
 
     def _setup(self):
         """Initial setup code when process first spawns."""
@@ -236,13 +257,13 @@ class Agent(mp.Process):
             self.network_parameters["size"],
             self.network_parameters["learning_rate"], self.nn_baseline)
 
-    def _main(self):
+    def run(self):
         self._setup()
 
         prev_state = None
         while True:
             # _agent_debug(" getting new task.")
-            state = self.state_queue.get()
+            state = self.get_state_transition(prev_state)
 
             if state is Agent.States.ROLLOUT:
                 _agent_debug(".ROLLOUT")
@@ -282,11 +303,23 @@ class Agent(mp.Process):
                         observations, baseline_prediction, normalized_q_n)
                 weights = self._model.train_agent(observations, actions, advantages)
 
-                # Not ideal b/c need to put duplicate sets of weights on queue
-                # for each agent. TODO(wy)
-                for _ in range(self.num_agents):
-                    self.network_weights.put(weights)
-                self.state_queue.task_done()
+
+                if self.async_transitions:
+                    if self.epoch_since_last_sync >= self.EPOCHES_PER_SYNC:
+                        self.epoch_since_last_sync = 1
+                        self.network_weights.put(weights)
+
+                        # Supervisor proceeds to update master weights after
+                        # seeing weights on queue
+                    else:
+                        self.epoch_since_last_sync += 1
+                else:
+                    # Not ideal b/c need to put duplicate sets of weights on queue
+                    # for each agent. TODO(wy)
+                    for _ in range(self.num_agents):
+                        self.network_weights.put(weights)
+                    self.state_queue.task_done()
+
                 prev_state = Agent.States.TRAIN
 
             elif state is Agent.States.UPDATE:
