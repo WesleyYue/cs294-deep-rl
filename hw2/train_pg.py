@@ -46,6 +46,7 @@ def main():
     parser.add_argument('--n_layers', '-l', type=int, default=1)
     parser.add_argument('--size', '-s', type=int, default=32)
     parser.add_argument('--num_agents', type=int, default=1)
+    parser.add_argument('--async_transitions', action='store_true')
     args = parser.parse_args()
 
     if not (os.path.exists('data')):
@@ -78,7 +79,8 @@ def main():
             seed=seed,
             n_layers=args.n_layers,
             size=args.size,
-            num_agents=args.num_agents)
+            num_agents=args.num_agents,
+            async_transitions=args.async_transitions)
         supervisor.start()
         supervisor.join()
 

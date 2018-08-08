@@ -60,7 +60,8 @@ class Supervisor(mp.Process):
             # network arguments
             n_layers=1,
             size=32,
-            num_agents=1):
+            num_agents=1,
+            async_transitions=False):
 
         if num_agents < 1:
             raise ValueError("Need at least 1 agent to do the rollout")
